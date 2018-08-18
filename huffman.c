@@ -23,11 +23,13 @@ struct map_char{
 
 //F U N C T I O N s
 FILE* open_file(char* path, char* mode);
-int  read_file(FILE* fp, struct map_char** map, unsigned char* size);
-void add_map(struct map_char** head, unsigned char new_data);
-void check_map(struct map_char** head, unsigned char data, unsigned char* size);
+int read_file(FILE* fp, struct map_char** map, unsigned char* size);
+int list_len(struct map_char* head);
+void add_map(struct map_char** head, unsigned char new_data, unsigned int freq);
+void check_map(struct map_char** head, unsigned char data);
 void print_map(struct map_char* head, unsigned char size);
 void free_map(struct map_char** head);
+void delete_map(struct map_char** head, struct map_char* node);
 
 int main(){
 
@@ -48,9 +50,14 @@ int main(){
         fprintf(stdout,"Error reading and mapping file.\n");
         return -1;
     }
+    n_items = list_len(list);
 
     //DEBUG
     print_map(list,n_items);
+
+    //BINARY TREE
+    
+
 
     //FREE
     free_map(&list);
@@ -96,7 +103,7 @@ int read_file(FILE* fp, struct map_char** map, unsigned char* size){
         for(int i=0; i<BUFF_SIZE; i++){
             if(buffer[i]!='\0'){
                 
-                check_map(map, buffer[i], size);
+                check_map(map, buffer[i]);
                 char s[3];
                 if(buffer[i]==10){
                     s[0] = 'L';
@@ -135,42 +142,90 @@ int read_file(FILE* fp, struct map_char** map, unsigned char* size){
     return 0;
 }
 
-void add_map(struct map_char** head, unsigned char new_data){
+void add_map(struct map_char** head, unsigned char new_data, unsigned int freq){
 
+    //adds at the front of the list
     if(!head)   return;
+    
+    //VARs
+    int i;
+    bool end = true;
+    struct map_char *new, *pointer;
+
     //ALLOCATE NODE
-    struct map_char* new = (struct map_char*)malloc(sizeof(struct map_char));
-    new->ascii           = new_data;
-    new->freq            = 1;
+    new = (struct map_char*)malloc(sizeof(struct map_char));
+    new->ascii  = new_data;
+    new->freq   = freq;
+
     if(!(*head)){   
         //empty list
-        new->next        = NULL;
-    }else{
-        new->next        = *head;
+        new->next   = NULL;
+        *head       = new;
+        return;
     }
-    *head = new;
-    
+    if(!(*head)->next){
+        //one element
+        if((*head)->freq <= freq){
+            new->next       = NULL;
+            (*head)->next   = new;        
+        }else{
+            new->next       = *head;
+            *head           = new;
+        }
+        return;
+    }
+        //multiple elements. scan.
+    i = 0;
+    pointer = *head;
+    while(pointer->next != NULL){
+        if(pointer->freq > freq){
+            end = false;
+            break;
+        }
+        pointer = pointer->next;
+        i++;
+    }
+
+    if(end && pointer->freq <= freq){
+        //insert as last node
+        pointer->next = new;
+        new->next   = NULL;        
+    }else{
+        
+        new->next   = pointer;  //next element
+        pointer     = *head;    //reset
+        for(int j=0; j<(i-1); j++)  pointer = pointer->next;
+
+        if(i!=0){               //previous element
+            pointer->next   = new;
+        }else{
+            *head           = new;        
+        }
+    }
+
     return;
 }
 
-void check_map(struct map_char** head, unsigned char data, unsigned char* size){
+void check_map(struct map_char** head, unsigned char data){
 
     if(!head)   return; //NULL
     
     //VARs
     bool found = false;
     unsigned char len = 0;
+
     //LOOP
     for(struct map_char* node=*head; node!=NULL; node=node->next){
         len++;
         if(data==node->ascii){
-            node->freq++;
+            unsigned int freq_tmp = node->freq;
+            delete_map(head,node);
+            add_map(head,data,++freq_tmp); 
             found = true;
             break;
         }
     }
-    if(!found)  add_map(head,data);
-    *size = len;
+    if(!found)  add_map(head,data,1);   //fresh node. freq=1.
 
     return;
 }
@@ -181,7 +236,7 @@ void print_map(struct map_char* head, unsigned char size){
         fprintf(stdout,"Empty map!\n");
         return;
     }
-
+    fprintf(stdout,"List -> Table:\n");
     fprintf(stdout,"%10s\t|%10s\t|%10s\n","ASCII","FREQ","HEX");
     for(struct map_char* node=head; node!=NULL; node=node->next){
         fprintf(stdout,"%10d\t|%10d\t|%10x\n",node->ascii,node->freq,node->ascii);
@@ -214,3 +269,68 @@ void free_map(struct map_char** head){
     return;
 }
 
+void delete_map(struct map_char** head, struct map_char* node){
+
+    if(!head||!(*head)||!node)  return;
+   
+    //VARs
+    int i;
+    bool found                  = false;
+    struct map_char *pointer    = *head;
+    
+
+    if(!pointer->next && pointer==node){
+        //one element
+        free(pointer);
+        *head = NULL;
+        return;
+    }  
+    
+        //multiple elements. scan.
+    i = 0;
+    while(pointer->next != NULL){
+        if(pointer == node){
+            found = true;
+            break;
+        }
+        pointer = pointer->next;
+        i++;
+    }
+
+    if(found && i==0){
+        //first element
+        *head = pointer->next;
+        free(pointer);
+        pointer = NULL;
+        return;
+    }
+
+    if(found){
+        //in between
+        struct map_char *prev = *head;
+        for(int j=0; j<(i-1); j++)  prev = prev->next;
+        prev->next = prev->next->next;
+        free(pointer);
+        pointer = NULL;
+        return;
+    }
+
+    if(!found && pointer==node){
+        //last element.
+        free(pointer);
+        pointer = *head;
+        for(int j=0; j<(i-1); j++)  pointer = pointer->next;
+        pointer->next = NULL;
+    }
+    return;
+}
+
+int list_len(struct map_char* head){
+
+    if(!head)   return -1;
+        
+    //VAR
+    int len = 0;
+    for(struct map_char* node=head; node!=NULL; node=node->next)   len++;
+    return len;
+}
