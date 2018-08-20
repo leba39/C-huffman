@@ -40,6 +40,7 @@ void free_map(struct map_char** head);
 void delete_map(struct map_char** head, struct map_char* node);
 void build_tree(struct bst_node** root, struct map_char** head);
 void cp_val(struct bst_node* tree_node, struct map_char* list_item, bool leaf);
+void print_tree(struct bst_node *bst, int indent);
 
 int main(){
 
@@ -67,8 +68,10 @@ int main(){
     print_map(list,n_items);
 
     //BINARY TREE
-    
+    build_tree(&root,&list);
 
+    //DEBUG
+    print_tree(root,0);
 
     //FREE
     free_map(&list);
@@ -398,7 +401,7 @@ void build_tree(struct bst_node** root, struct map_char** head){
                 parent->left    = min_node2;
                 parent->right   = min_node1;
             }    
-            parent->freq        = freq1+freq2; //calc_freq(parent)
+            parent->freq        = freq1+freq2;
 
             delete_map(head, min_1);
             delete_map(head, min_2);
@@ -434,4 +437,17 @@ unsigned int calc_freq(struct bst_node* node){
     }else{
         return (calc_freq(node->left)+calc_freq(node->right));
     } 
+}
+
+
+void print_tree(struct bst_node *bst, int indent){
+    
+    if(!bst){
+        fprintf(stdout, "Empty tree.\n");
+        return;
+    }
+    for(int i=0; i<indent; i++)     fprintf(stdout, "\t");
+    fprintf(stdout, "freq:%u (%d)\n", bst->freq, bst->ascii);
+    if(bst->left)       print_tree(bst->left,  indent+1);
+    if(bst->right)      print_tree(bst->right, indent+1);
 }
