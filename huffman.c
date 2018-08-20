@@ -14,22 +14,32 @@
 const int BUFF_SIZE = 16;
 
 //S T R U C T s
+struct bst_node{
+    unsigned char ascii;
+    unsigned int freq;
+    struct bst_node* left;
+    struct bst_node* right;
+};
+
 struct map_char{
     unsigned char ascii;
     unsigned int freq;
     struct map_char* next;
+    struct bst_node* node;
 };
-
 
 //F U N C T I O N s
 FILE* open_file(char* path, char* mode);
 int read_file(FILE* fp, struct map_char** map, unsigned char* size);
 int list_len(struct map_char* head);
-void add_map(struct map_char** head, unsigned char new_data, unsigned int freq);
+unsigned int calc_freq(struct bst_node* node);
+void add_map(struct map_char** head, unsigned char new_data, unsigned int freq, struct bst_node* node);
 void check_map(struct map_char** head, unsigned char data);
 void print_map(struct map_char* head, unsigned char size);
 void free_map(struct map_char** head);
 void delete_map(struct map_char** head, struct map_char* node);
+void build_tree(struct bst_node** root, struct map_char** head);
+void cp_val(struct bst_node* tree_node, struct map_char* list_item, bool leaf);
 
 int main(){
 
@@ -37,6 +47,7 @@ int main(){
     //VARs
     FILE* fp                = NULL;
     struct map_char* list   = NULL;
+    struct bst_node* root   = NULL;
     unsigned char n_items   = 0;
 
     //OPEN
@@ -142,7 +153,7 @@ int read_file(FILE* fp, struct map_char** map, unsigned char* size){
     return 0;
 }
 
-void add_map(struct map_char** head, unsigned char new_data, unsigned int freq){
+void add_map(struct map_char** head, unsigned char new_data, unsigned int freq, struct bst_node* node){
 
     //adds at the front of the list
     if(!head)   return;
@@ -156,6 +167,7 @@ void add_map(struct map_char** head, unsigned char new_data, unsigned int freq){
     new = (struct map_char*)malloc(sizeof(struct map_char));
     new->ascii  = new_data;
     new->freq   = freq;
+    new->node   = node;
 
     if(!(*head)){   
         //empty list
@@ -220,12 +232,12 @@ void check_map(struct map_char** head, unsigned char data){
         if(data==node->ascii){
             unsigned int freq_tmp = node->freq;
             delete_map(head,node);
-            add_map(head,data,++freq_tmp); 
+            add_map(head,data,++freq_tmp,NULL); 
             found = true;
             break;
         }
     }
-    if(!found)  add_map(head,data,1);   //fresh node. freq=1.
+    if(!found)  add_map(head,data,1,NULL);   //fresh node. freq=1.
 
     return;
 }
@@ -333,4 +345,93 @@ int list_len(struct map_char* head){
     int len = 0;
     for(struct map_char* node=head; node!=NULL; node=node->next)   len++;
     return len;
+}
+
+void build_tree(struct bst_node** root, struct map_char** head){
+
+    if(!root||!head||!(*head)) return;
+
+    //VARs
+    struct bst_node *parent, *min_node1, *min_node2;
+    int len;
+
+    len = list_len(*head);
+    
+    if(len==-1)    return;
+    if(len==1){
+        //ALLOC
+        parent          = (struct bst_node*)malloc(sizeof(struct bst_node));
+        min_node1       = (struct bst_node*)malloc(sizeof(struct bst_node));
+   
+        cp_val(min_node1, *head, true);
+      
+        parent->ascii   = 0;        //serves as flag. parent node.
+        parent->left    = min_node1;//could be right, doesnt matter
+        parent->right   = NULL;
+        parent->freq    = calc_freq(parent);
+
+    }else if(len>1){
+    
+        //VAR
+        int freq1, freq2;
+        struct map_char *min_1, *min_2;
+        //build tree
+        do{
+            //ALLOC
+            parent      = (struct bst_node*)malloc(sizeof(struct bst_node));
+            min_node1   = (struct bst_node*)malloc(sizeof(struct bst_node));
+            min_node2   = (struct bst_node*)malloc(sizeof(struct bst_node));
+
+            min_1 = *head;
+            min_2 = (*head)->next;
+           
+            cp_val(min_node1,min_1, (min_1->ascii!=0));
+            cp_val(min_node2,min_2, (min_2->ascii!=0));
+            freq1 = calc_freq(min_node1);
+            freq2 = calc_freq(min_node2);
+
+            parent->ascii   = 0;        //serves as flag. parent node.
+            if(freq1 < freq2){
+                parent->left    = min_node1;
+                parent->right   = min_node2;
+            }else{
+                parent->left    = min_node2;
+                parent->right   = min_node1;
+            }    
+            parent->freq        = freq1+freq2; //calc_freq(parent)
+
+            delete_map(head, min_1);
+            delete_map(head, min_2);
+            add_map(head, parent->ascii, parent->freq, parent);
+        }while(list_len(*head)!=1);
+    }
+
+    *root = parent;
+    return;
+}
+
+void cp_val(struct bst_node* tree_node, struct map_char* list_item, bool leaf){
+
+    if(!tree_node||!list_item)    return;
+    tree_node->ascii = list_item->ascii;
+    tree_node->freq  = list_item->freq;
+    if(leaf){
+        tree_node->right = NULL;
+        tree_node->left  = NULL;
+    }else{
+        tree_node->right = list_item->node->right;
+        tree_node->left  = list_item->node->left;
+    }   
+    return;
+}
+
+unsigned int calc_freq(struct bst_node* node){
+    
+    if(!node)   return 0;
+    
+    if(!(node->left)&&!(node->right)){
+        return node->freq;
+    }else{
+        return (calc_freq(node->left)+calc_freq(node->right));
+    } 
 }
