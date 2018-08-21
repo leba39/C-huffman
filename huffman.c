@@ -40,7 +40,8 @@ void free_map(struct map_char** head);
 void delete_map(struct map_char** head, struct map_char* node);
 void build_tree(struct bst_node** root, struct map_char** head);
 void cp_val(struct bst_node* tree_node, struct map_char* list_item, bool leaf);
-void print_tree(struct bst_node *bst, int indent);
+void print_tree(struct bst_node* bst, int indent);
+void free_tree(struct bst_node* root);
 
 int main(){
 
@@ -65,17 +66,20 @@ int main(){
     n_items = list_len(list);
 
     //DEBUG
+    fprintf(stdout,"List -> Frequencies sorted.\n");
     print_map(list,n_items);
 
     //BINARY TREE
     build_tree(&root,&list);
 
     //DEBUG
-    print_tree(root,0);
+    fprintf(stdout,"BST -> Printing tree:\n");
+    print_tree(root,1);
 
     //FREE
     free_map(&list);
-    
+    free_tree(root);
+
     return 0;
 }
 
@@ -251,7 +255,7 @@ void print_map(struct map_char* head, unsigned char size){
         fprintf(stdout,"Empty map!\n");
         return;
     }
-    fprintf(stdout,"List -> Table:\n");
+    fprintf(stdout,"List -> Printing table:\n");
     fprintf(stdout,"%10s\t|%10s\t|%10s\n","ASCII","FREQ","HEX");
     for(struct map_char* node=head; node!=NULL; node=node->next){
         fprintf(stdout,"%10d\t|%10d\t|%10x\n",node->ascii,node->freq,node->ascii);
@@ -359,7 +363,8 @@ void build_tree(struct bst_node** root, struct map_char** head){
     int len;
 
     len = list_len(*head);
-    
+ 
+    fprintf(stdout,"BST -> Building Huffman tree...\n");   
     if(len==-1)    return;
     if(len==1){
         //ALLOC
@@ -440,14 +445,35 @@ unsigned int calc_freq(struct bst_node* node){
 }
 
 
-void print_tree(struct bst_node *bst, int indent){
+void print_tree(struct bst_node* bst, int indent){
     
     if(!bst){
         fprintf(stdout, "Empty tree.\n");
         return;
     }
     for(int i=0; i<indent; i++)     fprintf(stdout, "\t");
-    fprintf(stdout, "freq:%u (%d)\n", bst->freq, bst->ascii);
+    if(bst->ascii==0){
+        fprintf(stdout, "freq:%u (NODE)\n", bst->freq);
+    }else{
+        fprintf(stdout, "freq:%u dec:%d (LEAF)\n", bst->freq, bst->ascii);
+    }
     if(bst->left)       print_tree(bst->left,  indent+1);
     if(bst->right)      print_tree(bst->right, indent+1);
+}
+
+void free_tree(struct bst_node* root){
+
+    if(!root)   return;
+
+    //recurse down left subtrees
+    free_tree(root->left);
+    root->left = NULL;
+    //recurse down right subtrees
+    free_tree(root->right);
+    root->right = NULL;
+    //free node
+    free(root);
+    root = NULL;
+
+    return;
 }
