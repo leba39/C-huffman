@@ -77,8 +77,8 @@ int main(){
     print_tree(root,1);
 
     //FREE
-    free_map(&list);
-    free_tree(root);
+    free_tree(root);    //this order is important, so that when we go into free_map the node pointed by our last item (list) would be already 
+    free_map(&list);    //freed by this function (free_tree). thats why we were getting an invalid freed showing up in our valgrind tests.
 
     return 0;
 }
@@ -276,14 +276,20 @@ void free_map(struct map_char** head){
     struct map_char* pointer=*head;
     do{
         *head = (*head)->next;
+        free((*head)->node);           
+        (*head)->node   = NULL;
         free(pointer);
         pointer = *head;
     }while(pointer->next != NULL);
     
     LAST_NODE:
     //last one
+        /*unnecessary since we already freed node in the free_tree function. we need to call free_tree then free_map...
+         otherwise valgrind would show an invalid free warning, although it isnt a proper error and no leaks would be found*/
+    //free((*head)->node);              
+    //(*head)->node = NULL;
     free(*head);
-    *head = NULL;
+    *head           = NULL;
 
     return;
 }
@@ -300,6 +306,8 @@ void delete_map(struct map_char** head, struct map_char* node){
 
     if(!pointer->next && pointer==node){
         //one element
+        free(pointer->node);
+        pointer->node = NULL;
         free(pointer);
         *head = NULL;
         return;
@@ -319,6 +327,8 @@ void delete_map(struct map_char** head, struct map_char* node){
     if(found && i==0){
         //first element
         *head = pointer->next;
+        free(pointer->node);
+        pointer->node = NULL;
         free(pointer);
         pointer = NULL;
         return;
@@ -329,6 +339,8 @@ void delete_map(struct map_char** head, struct map_char* node){
         struct map_char *prev = *head;
         for(int j=0; j<(i-1); j++)  prev = prev->next;
         prev->next = prev->next->next;
+        free(pointer->node);
+        pointer->node = NULL;
         free(pointer);
         pointer = NULL;
         return;
@@ -336,6 +348,8 @@ void delete_map(struct map_char** head, struct map_char* node){
 
     if(!found && pointer==node){
         //last element.
+        free(pointer->node);
+        pointer->node = NULL;
         free(pointer);
         pointer = *head;
         for(int j=0; j<(i-1); j++)  pointer = pointer->next;
@@ -385,13 +399,14 @@ void build_tree(struct bst_node** root, struct map_char** head){
         struct map_char *min_1, *min_2;
         //build tree
         do{
+            //next two from sorted list
+            min_1 = *head;
+            min_2 = (*head)->next;
+
             //ALLOC
             parent      = (struct bst_node*)malloc(sizeof(struct bst_node));
             min_node1   = (struct bst_node*)malloc(sizeof(struct bst_node));
             min_node2   = (struct bst_node*)malloc(sizeof(struct bst_node));
-
-            min_1 = *head;
-            min_2 = (*head)->next;
            
             cp_val(min_node1,min_1, (min_1->ascii!=0));
             cp_val(min_node2,min_2, (min_2->ascii!=0));
