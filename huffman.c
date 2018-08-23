@@ -11,6 +11,7 @@
 #include <stdbool.h>
 
 //C O N S T A N T s   &   D E F I N E s
+#define CODE 9  //8+nullbyte
 const int BUFF_SIZE = 16;
 
 //S T R U C T s
@@ -28,6 +29,12 @@ struct map_char{
     struct bst_node* node;
 };
 
+struct map_prefix{
+    unsigned char ascii;
+    char prefix[CODE];
+    struct map_prefix* next;
+};
+
 //F U N C T I O N s
 FILE* open_file(char* path, char* mode);
 int read_file(FILE* fp, struct map_char** map, unsigned char* size);
@@ -42,6 +49,8 @@ void build_tree(struct bst_node** root, struct map_char** head);
 void cp_val(struct bst_node* tree_node, struct map_char* list_item, bool leaf);
 void print_tree(struct bst_node* bst, int indent);
 void free_tree(struct bst_node* root);
+void add_prefix(unsigned char ascii, char* prefix, struct map_prefix** head);
+void build_prefixes(struct bst_node* root, struct map_prefix** list, char prefix[]);
 
 int main(){
 
@@ -50,7 +59,9 @@ int main(){
     FILE* fp                = NULL;
     struct map_char* list   = NULL;
     struct bst_node* root   = NULL;
+    struct map_prefix* code = NULL;
     unsigned char n_items   = 0;
+    char code_tmp[CODE]     = {'\0'};   //same as memset-ing it later
 
     //OPEN
     if((fp = open_file("file.txt","r"))==NULL){
@@ -75,6 +86,11 @@ int main(){
     //DEBUG
     fprintf(stdout,"BST -> Printing tree:\n");
     print_tree(root,1);
+
+    //HUFFMAN PREFIX
+    build_prefixes(root, &code, code_tmp);
+
+    //TODO: Comprobar las strings en los items de code. verificar que se copian bien. hacer assert de que el num de items en code es igual a n_items.
 
     //FREE
     free_tree(root);    //this order is important, so that when we go into free_map the node pointed by our last item (list) would be already 
@@ -490,5 +506,54 @@ void free_tree(struct bst_node* root){
     free(root);
     root = NULL;
 
+    return;
+}
+
+void add_prefix(unsigned char ascii, char* prefix, struct map_prefix** head){
+
+    if(!head)   return;
+    
+    //ALLOC
+    struct map_prefix* new = (struct map_prefix*)malloc(sizeof(struct map_prefix));
+    new->ascii  = ascii;
+    strcpy(new->prefix, prefix);
+    
+    new->next   = *head;
+    *head       = new;
+    
+    return;
+}
+
+void build_prefixes(struct bst_node* root, struct map_prefix** list, char prefix[]){
+
+    if(!root||!list)    return;
+    
+    //VARs
+    const char* move_left   = "0";
+    const char* move_right  = "1";
+    int index;
+
+    if(!root->left&&!root->right){
+        //leaf
+        //add_prefix(root->ascii, prefix, list);
+        fprintf(stdout,"LEAF: (dec)%d\t(prefix)%s\n",root->ascii, prefix);
+    }else{
+        //append and recurse down left
+        strcat(prefix,move_left);
+        build_prefixes(root->left,list,prefix);
+
+        //clean
+        index           = strlen(prefix);
+        prefix[index-1] = '\0';           
+
+        //append and recurse down right
+        strcat(prefix,move_right);
+        build_prefixes(root->right,list,prefix);
+
+        //clean
+        index           = strlen(prefix);
+        prefix[index-1] = '\0';     
+    }
+    
     return;
 }
