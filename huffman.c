@@ -9,6 +9,7 @@
 #include <string.h>
 #include <errno.h>
 #include <stdbool.h>
+#include <assert.h>
 
 //C O N S T A N T s   &   D E F I N E s
 #define CODE 9  //8+nullbyte
@@ -31,6 +32,8 @@ struct map_char{
 
 struct map_prefix{
     unsigned char ascii;
+    unsigned char prefix_dec;    
+    unsigned char prefix_len;
     char prefix[CODE];
     struct map_prefix* next;
 };
@@ -40,6 +43,7 @@ FILE* open_file(char* path, char* mode);
 int read_file(FILE* fp, struct map_char** map, unsigned char* size);
 int list_len(struct map_char* head);
 unsigned int calc_freq(struct bst_node* node);
+unsigned char str_to_dec(char str[], unsigned char len);
 void add_map(struct map_char** head, unsigned char new_data, unsigned int freq, struct bst_node* node);
 void check_map(struct map_char** head, unsigned char data);
 void print_map(struct map_char* head, unsigned char size);
@@ -51,6 +55,7 @@ void print_tree(struct bst_node* bst, int indent);
 void free_tree(struct bst_node* root);
 void add_prefix(unsigned char ascii, char* prefix, struct map_prefix** head);
 void build_prefixes(struct bst_node* root, struct map_prefix** list, char prefix[]);
+void free_prefix(struct map_prefix** head);
 
 int main(){
 
@@ -61,7 +66,9 @@ int main(){
     struct bst_node* root   = NULL;
     struct map_prefix* code = NULL;
     unsigned char n_items   = 0;
+    unsigned char n_prefix  = 0;
     char code_tmp[CODE]     = {'\0'};   //same as memset-ing it later
+    
 
     //OPEN
     if((fp = open_file("file.txt","r"))==NULL){
@@ -90,11 +97,19 @@ int main(){
     //HUFFMAN PREFIX
     build_prefixes(root, &code, code_tmp);
 
-    //TODO: Comprobar las strings en los items de code. verificar que se copian bien. hacer assert de que el num de items en code es igual a n_items.
+    //ASSERT
+    for(struct map_prefix* pointer=code; pointer!=NULL; pointer = pointer->next){
+        n_prefix++;
+        fprintf(stdout,"dec %d prefix %s prefix_len %d prefix_dec %d\n",pointer->ascii, pointer->prefix, pointer->prefix_len, pointer->prefix_dec);
+    }
+    assert(n_prefix==n_items);
+
+    //TODO: Intentar hacer un free_list con void* para map_char y map_prefix? podria hacer otro assert despues de build_tree para asegurarme
 
     //FREE
     free_tree(root);    //this order is important, so that when we go into free_map the node pointed by our last item (list) would be already 
     free_map(&list);    //freed by this function (free_tree). thats why we were getting an invalid freed showing up in our valgrind tests.
+    free_prefix(&code);
 
     return 0;
 }
@@ -293,7 +308,7 @@ void free_map(struct map_char** head){
     do{
         *head = (*head)->next;
         free((*head)->node);           
-        (*head)->node   = NULL;
+        (*head)->node = NULL;
         free(pointer);
         pointer = *head;
     }while(pointer->next != NULL);
@@ -305,7 +320,7 @@ void free_map(struct map_char** head){
     //free((*head)->node);              
     //(*head)->node = NULL;
     free(*head);
-    *head           = NULL;
+    *head = NULL;
 
     return;
 }
@@ -517,7 +532,8 @@ void add_prefix(unsigned char ascii, char* prefix, struct map_prefix** head){
     struct map_prefix* new = (struct map_prefix*)malloc(sizeof(struct map_prefix));
     new->ascii  = ascii;
     strcpy(new->prefix, prefix);
-    
+    new->prefix_len = strlen(new->prefix);
+    new->prefix_dec = str_to_dec(new->prefix, new->prefix_len);
     new->next   = *head;
     *head       = new;
     
@@ -535,7 +551,7 @@ void build_prefixes(struct bst_node* root, struct map_prefix** list, char prefix
 
     if(!root->left&&!root->right){
         //leaf
-        //add_prefix(root->ascii, prefix, list);
+        add_prefix(root->ascii, prefix, list);
         fprintf(stdout,"LEAF: (dec)%d\t(prefix)%s\n",root->ascii, prefix);
     }else{
         //append and recurse down left
@@ -556,4 +572,42 @@ void build_prefixes(struct bst_node* root, struct map_prefix** list, char prefix
     }
     
     return;
+}
+
+void free_prefix(struct map_prefix** head){
+
+    if(!head||!(*head))  return;
+
+    //one element.
+    if(!(*head)->next)  goto LAST_NODE;
+
+    //multiple elements
+    struct map_prefix* pointer=*head;
+    do{
+        *head = (*head)->next;
+        free(pointer);
+        pointer = *head;
+    }while(pointer->next != NULL);
+    
+    LAST_NODE:
+    //last one
+    free(*head);
+    *head = NULL;
+
+    return;
+}
+
+unsigned char str_to_dec(char str[], unsigned char len){
+
+    if(!str||len==0)    return 0;
+
+    unsigned char pos = 0;
+    unsigned char dec = 0;
+    for(int i=len; i>0; i--){
+        dec += (str[i-1]=='1') ? 1<<pos : 0;
+        pos++;
+    }
+    fprintf(stdout,"\nstr_to_dec  %s %d\n",str,len);
+    
+    return dec;
 }
