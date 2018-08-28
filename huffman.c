@@ -12,8 +12,9 @@
 #include <assert.h>
 
 //C O N S T A N T s   &   D E F I N E s
-#define CODE 9  //8+nullbyte
-const int BUFF_SIZE = 16;
+#define CODE 9              //8+nullbyte
+#define ID_LEN 2            //magic string len
+const int BUFF_SIZE = 16;   //buffered reader
 
 //S T R U C T s
 struct bst_node{
@@ -42,6 +43,7 @@ struct map_prefix{
 FILE* open_file(char* path, char* mode);
 int read_file(FILE* fp, struct map_char** map, unsigned char* size);
 int list_len(struct map_char* head);
+int write_id(FILE* fp);
 unsigned int calc_freq(struct bst_node* node);
 unsigned char str_to_dec(char str[], unsigned char len);
 void add_map(struct map_char** head, unsigned char new_data, unsigned int freq, struct bst_node* node);
@@ -56,6 +58,7 @@ void free_tree(struct bst_node* root);
 void add_prefix(unsigned char ascii, char* prefix, struct map_prefix** head);
 void build_prefixes(struct bst_node* root, struct map_prefix** list, char prefix[]);
 void free_prefix(struct map_prefix** head);
+void print_prefix(struct map_prefix* head);
 
 int main(){
 
@@ -89,28 +92,44 @@ int main(){
 
     //BINARY TREE
     build_tree(&root,&list);
+    assert(list_len(list)==1);  //should be one. free_map doesn't need a multiple-item list casuistic althought we have it covered    
 
     //DEBUG
     fprintf(stdout,"BST -> Printing tree:\n");
     print_tree(root,1);
 
     //HUFFMAN PREFIX
+    fprintf(stdout,"Prefix -> Building prefixes...\n");
     build_prefixes(root, &code, code_tmp);
 
     //ASSERT
-    for(struct map_prefix* pointer=code; pointer!=NULL; pointer = pointer->next){
-        n_prefix++;
-        fprintf(stdout,"dec %d prefix %s prefix_len %d prefix_dec %d\n",pointer->ascii, pointer->prefix, pointer->prefix_len, pointer->prefix_dec);
-    }
+    for(struct map_prefix* pointer=code; pointer!=NULL; pointer = pointer->next)    n_prefix++;
     assert(n_prefix==n_items);
 
-    //TODO: Intentar hacer un free_list con void* para map_char y map_prefix? podria hacer otro assert despues de build_tree para asegurarme
+    //DEBUG 
+    print_prefix(code);
+
+    //OUTPUT
+    fp = NULL;          //input already closed
+    if((fp = open_file("compressed.bin","w"))==NULL){
+        fprintf(stdout,"Error opening output file.\n");
+        return -1;
+    }   
+
+    //SIGN FILE
+    if((write_id(fp)!=0)){
+        fprintf(stdout,"Error writing file identifiers.\n");
+        return -1;      
+    }  
+
 
     //FREE
     free_tree(root);    //this order is important, so that when we go into free_map the node pointed by our last item (list) would be already 
     free_map(&list);    //freed by this function (free_tree). thats why we were getting an invalid freed showing up in our valgrind tests.
     free_prefix(&code);
 
+
+    //TODO: cambiar return codes en caso de error para el main y cambiar stdouts por stderrs donde hiciese falta
     return 0;
 }
 
@@ -548,11 +567,10 @@ void build_prefixes(struct bst_node* root, struct map_prefix** list, char prefix
     const char* move_left   = "0";
     const char* move_right  = "1";
     int index;
-
+    
     if(!root->left&&!root->right){
         //leaf
         add_prefix(root->ascii, prefix, list);
-        fprintf(stdout,"LEAF: (dec)%d\t(prefix)%s\n",root->ascii, prefix);
     }else{
         //append and recurse down left
         strcat(prefix,move_left);
@@ -607,7 +625,34 @@ unsigned char str_to_dec(char str[], unsigned char len){
         dec += (str[i-1]=='1') ? 1<<pos : 0;
         pos++;
     }
-    fprintf(stdout,"\nstr_to_dec  %s %d\n",str,len);
     
     return dec;
+}
+
+void print_prefix(struct map_prefix* head){
+    
+    if(!head){
+        fprintf(stdout,"Empty map_prefix!\n");
+        return;
+    }
+    fprintf(stdout,"Prefix -> Printing table:\n");
+    fprintf(stdout,"%10s\t|%10s\t|%10s\t|%10s\t|%10s\n","ASCII_DEC","PREFIX","PREFIX_DEC","PREFIX_HEX","PREFIX_LEN");
+    for(struct map_prefix* node=head; node!=NULL; node=node->next){
+        fprintf(stdout,"%10d\t|%10s\t|%10d\t|%10x\t|%10d\n",node->ascii,node->prefix,node->prefix_dec,node->prefix_dec,node->prefix_len);
+    }
+
+    return;
+}
+
+int write_id(FILE* fp){
+
+    if(!fp) return -1;
+    
+    //VARs
+    const unsigned char ID[ID_LEN] = {244,245};  //ids
+
+    if(fwrite(ID,sizeof(unsigned char),ID_LEN,fp)!=ID_LEN){ //should be equal to ID_len because sizeof(unsigned char) is 1 byte
+        return -1;
+    }
+    return 0;
 }
