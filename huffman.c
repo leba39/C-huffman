@@ -41,9 +41,10 @@ struct map_prefix{
 
 //F U N C T I O N s
 FILE* open_file(char* path, char* mode);
-int read_file(FILE* fp, struct map_char** map, unsigned char* size);
+int read_file(FILE* fp, struct map_char** map, unsigned long* size);
 int list_len(struct map_char* head);
 int write_id(FILE* fp);
+int write_header(FILE* fp, struct map_prefix* list, unsigned char* list_len, unsigned long* n_bytes);
 unsigned int calc_freq(struct bst_node* node);
 unsigned char str_to_dec(char str[], unsigned char len);
 void add_map(struct map_char** head, unsigned char new_data, unsigned int freq, struct bst_node* node);
@@ -64,23 +65,25 @@ int main(){
 
 
     //VARs
-    FILE* fp                = NULL;
+    FILE* fp_in             = NULL;
+    FILE* fp_out            = NULL;
     struct map_char* list   = NULL;
     struct bst_node* root   = NULL;
     struct map_prefix* code = NULL;
     unsigned char n_items   = 0;
     unsigned char n_prefix  = 0;
+    unsigned long n_bytes   = 0;
     char code_tmp[CODE]     = {'\0'};   //same as memset-ing it later
-    
+
 
     //OPEN
-    if((fp = open_file("file.txt","r"))==NULL){
+    if((fp_in = open_file("file.txt","r"))==NULL){
         fprintf(stdout,"Error opening file.\n");
         return -1;
     }
 
     //PROCESS
-    if(read_file(fp,&list,&n_items)!=0){
+    if(read_file(fp_in,&list,&n_bytes)!=0){
         fprintf(stdout,"Error reading and mapping file.\n");
         return -1;
     }
@@ -92,7 +95,7 @@ int main(){
 
     //BINARY TREE
     build_tree(&root,&list);
-    assert(list_len(list)==1);  //should be one. free_map doesn't need a multiple-item list casuistic althought we have it covered    
+    assert(list_len(list)==1);  //should be one. this way free_map doesn't need a multiple-item list casuistic althought we have it covered    
 
     //DEBUG
     fprintf(stdout,"BST -> Printing tree:\n");
@@ -110,26 +113,46 @@ int main(){
     print_prefix(code);
 
     //OUTPUT
-    fp = NULL;          //input already closed
-    if((fp = open_file("compressed.bin","w"))==NULL){
+    fp_in = NULL;          //input already closed
+    if((fp_out = open_file("compressed.bin","w"))==NULL){
         fprintf(stdout,"Error opening output file.\n");
         return -1;
     }   
 
     //SIGN FILE
-    if((write_id(fp)!=0)){
+    if((write_id(fp_out)!=0)){
         fprintf(stdout,"Error writing file identifiers.\n");
+        if(fclose(fp_out)!=0){
+            perror("Error closing output file in write_id");
+        }
         return -1;      
     }  
+    
+    //WRITE HEADER INFO. NO BYTES AND PREFIX TABLE
+    if((write_header(fp_out, code, &n_prefix, &n_bytes)!=0)){
+        fprintf(stdout,"Error writing file headers.\n");
+        return -1;
+    }
+
+    //OPEN INPUT FOR 2ND PASS
+    if((fp_in = open_file("file.txt","r"))==NULL){
+        fprintf(stdout,"Error opening file.\n");
+        return -1;
+    }
+
+    //COMPRESS
+    
 
 
+    //TODO: acordarse de cerrar el archivos
+    //TODO: cambiar return codes en caso de error para el main y cambiar stdouts por stderrs donde hiciese falta
+    
     //FREE
     free_tree(root);    //this order is important, so that when we go into free_map the node pointed by our last item (list) would be already 
     free_map(&list);    //freed by this function (free_tree). thats why we were getting an invalid freed showing up in our valgrind tests.
     free_prefix(&code);
 
 
-    //TODO: cambiar return codes en caso de error para el main y cambiar stdouts por stderrs donde hiciese falta
     return 0;
 }
 
@@ -143,12 +166,12 @@ FILE* open_file(char* path, char* mode){
     if(!fp){
         perror("Error in open_file");
     }else{
-        fprintf(stdout,"File opened!\n");
+        fprintf(stdout,"File -> %s opened.\n",(strcmp(mode,"r")==0) ? "(input)":"(output)");
     }
     return fp;
 }
 
-int read_file(FILE* fp, struct map_char** map, unsigned char* size){
+int read_file(FILE* fp, struct map_char** map, unsigned long* size){
 
     if(!fp||!map||!size)  return -1;
 
@@ -159,8 +182,8 @@ int read_file(FILE* fp, struct map_char** map, unsigned char* size){
 
     //TELL
     fseek(fp,0L,SEEK_END);
-    nbytes = ftell(fp);
-    fprintf(stdout,"File -> No. bytes: %d\n",nbytes);
+    *size = ftell(fp);
+    fprintf(stdout,"File -> No. bytes: %ld\n",*size);
     rewind(fp);
 
     //BUFFERED STREAM
@@ -651,8 +674,49 @@ int write_id(FILE* fp){
     //VARs
     const unsigned char ID[ID_LEN] = {244,245};  //ids
 
+    fprintf(stdout,"File -> (output) writing identifiers...\n");
     if(fwrite(ID,sizeof(unsigned char),ID_LEN,fp)!=ID_LEN){ //should be equal to ID_len because sizeof(unsigned char) is 1 byte
         return -1;
     }
+    return 0;
+}
+
+int write_header(FILE* fp, struct map_prefix* list, unsigned char* list_len, unsigned long* n_bytes){
+
+    if(!fp) return -1;
+    
+    //VAR
+    unsigned char count = 0;
+
+
+    fprintf(stdout,"File -> (output) writing headers...\n");
+    //file should be already open with cursor at the end after writing identifiers
+    if(ftell(fp)!=ID_LEN){
+        if(fseek(fp, 0L, SEEK_END)!=0){
+            perror("Error seeking end of output file in write_header.");
+            return -1;
+        }
+    }
+
+    //original file no bytes
+    if(fwrite(n_bytes,sizeof(unsigned long),1,fp)!=1){ 
+        return -1;
+    }
+
+    //prefix table
+    if(fwrite(list_len,sizeof(unsigned char),1,fp)!=1){
+        return -1;
+    }
+
+    for(struct map_prefix* pointer=list; pointer!=NULL; pointer=pointer->next){
+
+        //ascii (dec), prefix (dec) and prefix len
+        if(fwrite(&(pointer->ascii),sizeof(unsigned char),1,fp)!=1)         return -1;
+        if(fwrite(&(pointer->prefix_dec),sizeof(unsigned char),1,fp)!=1)    return -1;
+        if(fwrite(&(pointer->prefix_len),sizeof(unsigned char),1,fp)!=1)    return -1;
+        count++;
+    }
+    assert(*list_len==count);   //just to reassure procedure
+
     return 0;
 }
