@@ -14,6 +14,8 @@
 //C O N S T A N T s   &   D E F I N E s
 #define CODE 9              //8+nullbyte
 #define ID_LEN 2            //magic string len
+#define CACHE_SIZE 2        //cache len in compress
+#define BYTE_BITS 8         //bits in a byte
 const int BUFF_SIZE = 16;   //buffered reader
 
 //S T R U C T s
@@ -42,6 +44,7 @@ struct map_prefix{
 //F U N C T I O N s
 FILE* open_file(char* path, char* mode);
 int read_file(FILE* fp, struct map_char** map, unsigned long* size);
+int compress(FILE* fp_in, FILE* fp_out, struct map_prefix* root);
 int list_len(struct map_char* head);
 int write_id(FILE* fp);
 int write_header(FILE* fp, struct map_prefix* list, unsigned char* list_len, unsigned long* n_bytes);
@@ -60,6 +63,8 @@ void add_prefix(unsigned char ascii, char* prefix, struct map_prefix** head);
 void build_prefixes(struct bst_node* root, struct map_prefix** list, char prefix[]);
 void free_prefix(struct map_prefix** head);
 void print_prefix(struct map_prefix* head);
+struct map_prefix* get_prefix(struct map_prefix* root, unsigned char ascii_dec);
+bool fill_cache(unsigned char cache[], struct map_prefix* byte_node);
 
 int main(){
 
@@ -120,7 +125,7 @@ int main(){
     }   
 
     //SIGN FILE
-    if((write_id(fp_out)!=0)){
+    if(write_id(fp_out)!=0){
         fprintf(stdout,"Error writing file identifiers.\n");
         if(fclose(fp_out)!=0){
             perror("Error closing output file in write_id");
@@ -129,8 +134,11 @@ int main(){
     }  
     
     //WRITE HEADER INFO. NO BYTES AND PREFIX TABLE
-    if((write_header(fp_out, code, &n_prefix, &n_bytes)!=0)){
+    if(write_header(fp_out, code, &n_prefix, &n_bytes)!=0){
         fprintf(stdout,"Error writing file headers.\n");
+        if(fclose(fp_out)!=0){
+            perror("Error closing output file in write_header");
+        }
         return -1;
     }
 
@@ -141,7 +149,13 @@ int main(){
     }
 
     //COMPRESS
-    
+    if(compress(fp_in, fp_out, code)!=0){
+        fprintf(stdout,"Error compressing output file.\n");
+        if((fclose(fp_out)!=0)||fclose(fp_in)!=0){
+            perror("Error closing output/input file(s) in compress.");
+        }
+        return -1;
+    }
 
 
     //TODO: acordarse de cerrar el archivos
@@ -176,8 +190,8 @@ int read_file(FILE* fp, struct map_char** map, unsigned long* size){
     if(!fp||!map||!size)  return -1;
 
     //VARs
-    int nbytes, exit = 0;
-    char buffer[BUFF_SIZE];   
+    unsigned int nbytes, exit = 0;
+    unsigned char buffer[BUFF_SIZE];   
         //need to find opt value for buffer_size to reduce system calls
 
     //TELL
@@ -222,7 +236,7 @@ int read_file(FILE* fp, struct map_char** map, unsigned long* size){
         if(ferror(fp)!=0)   fprintf(stderr,"read_file ferror.\n");
     }
     //CLOSING FILE POINTER.
-    if(fclose(fp) == 0){
+    if(fclose(fp)==0){
         fprintf(stdout,"File -> File closed.\n");
     }else{
         //sets errno.
@@ -719,4 +733,127 @@ int write_header(FILE* fp, struct map_prefix* list, unsigned char* list_len, uns
     assert(*list_len==count);   //just to reassure procedure
 
     return 0;
+}
+
+struct map_prefix* get_prefix(struct map_prefix* root, unsigned char ascii_dec){
+
+    if(!root)   return NULL;
+
+    //VAR
+    struct map_prefix* pointer = NULL;
+
+    for(pointer=root; pointer!=NULL; pointer=pointer->next){
+        if(pointer->ascii==ascii_dec)   break;
+    }
+
+    return pointer; //could be NULL if not found. that'd be an error.
+}
+
+int compress(FILE* fp_in, FILE* fp_out, struct map_prefix* root){
+
+    if(!fp_in||!fp_out||!root)  return -1;
+
+    //VARs
+    int exit = 0;
+    unsigned int nbytes;
+    unsigned char buffer[BUFF_SIZE];                //need to find opt value for buffer_size to reduce system calls
+    unsigned char cache[CACHE_SIZE] = {'\0','\0'};  //holds two bytes, we fill one, keep the leftovers in the other, write to output and clean
+
+    //PREPARE INPUT
+    if(ftell(fp_in)!=0) rewind(fp_in); //same as fseek(fp,0L,SEEK_END);
+
+    //BUFFERED STREAM
+    fprintf(stdout,"File -> Reading file using buffer of: %d (bytes)\n",BUFF_SIZE);
+    memset(buffer,'\0',sizeof(char)*BUFF_SIZE);
+    while((nbytes=fread(buffer,sizeof(unsigned char),BUFF_SIZE,fp_in)!=0)){
+        
+        struct map_prefix* byte_prefix  = NULL;
+        for(int i=0; i<nbytes; i++){
+               
+            //identify byte in prefix_table
+            if((byte_prefix = get_prefix(root,buffer[i]))==NULL){   //it wont happen if we mapped correctly 
+                fprintf(stdout,"Compress -> Cant map input to prefix_table.\n");
+                exit = -1;
+                goto STOP;
+            }
+
+            //fill cache with byte
+            if(fill_cache(cache, byte_prefix)==true){
+
+                //write first byte of cache
+                if(fwrite(cache,sizeof(unsigned char),1,fp_out)!=1){
+                    exit = -1;
+                    goto STOP;
+                };
+    
+                //swap positions
+                cache[0] = cache[1];
+                cache[1] = '\0';
+            }
+        }
+
+        memset(buffer,'\0',sizeof(unsigned char)*BUFF_SIZE);
+        exit++;
+    }
+    fprintf(stdout,"File -> File (output) compressed correctly.\n");
+
+STOP:
+    //STOPPED READING
+    if(feof(fp_in)!=0){
+        fprintf(stdout,"File -> File (input) read successfully in %d passes.\n",exit);
+    }else{
+        fprintf(stdout,"File -> Couldnt process input file.\n");
+        if(ferror(fp_in)!=0)   fprintf(stderr,"compress ferror.\n");
+    }
+    //CLOSING FILE POINTER.
+    if(fclose(fp_in)==0&&fclose(fp_out)==0){
+        fprintf(stdout,"File -> File(s) (input|output) closed.\n");
+    }else{
+        //sets errno.
+        perror("closing file(s) in compress");
+        return -2;
+    }
+    if(exit==-1)    return -1;   
+
+    return 0;
+}
+
+bool fill_cache(unsigned char cache[], struct map_prefix* byte_node){
+
+    if(!cache||!byte_node)   return false;
+
+    //VARs
+    static unsigned char cursor     = BYTE_BITS;
+    unsigned char byte_dec, byte_len, byte_buff;
+    signed char pos;    
+    
+    //DEFINE
+    byte_dec = byte_node->prefix_dec;
+    byte_len = byte_node->prefix_len;
+
+    pos = cursor-byte_len;
+
+    if(pos>0){
+        
+        cursor      = pos;
+        byte_buff   = byte_dec << pos;
+        cache[0]    = cache[0] | byte_buff; 
+
+        return false;
+    }else if(pos<0){
+        
+        pos         = abs(pos);
+        cursor      = BYTE_BITS-pos;
+        byte_buff   = byte_dec >> pos;
+        cache[0]    = cache[0] | byte_buff;
+        cache[1]    = byte_dec << cursor;
+
+    }else{
+        //pos==0;
+        cursor      = BYTE_BITS;
+        cache[0]    = cache[0] | byte_dec;  //perfect fit
+
+    }
+
+    return true;
 }
