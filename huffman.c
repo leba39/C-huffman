@@ -66,7 +66,7 @@ void print_prefix(struct map_prefix* head);
 struct map_prefix* get_prefix(struct map_prefix* root, unsigned char ascii_dec);
 bool fill_cache(unsigned char cache[], struct map_prefix* byte_node);
 
-int main(){
+int main(int argc, char** argv){
 
 
     //VARs
@@ -79,6 +79,29 @@ int main(){
     unsigned char n_prefix  = 0;
     unsigned long n_bytes   = 0;
     char code_tmp[CODE]     = {'\0'};   //same as memset-ing it later
+    char *mode              = NULL;
+    char *filename_in       = NULL;
+    char *filename_out      = NULL;
+
+    //CLA
+    if(argc<3||argc>4){
+        fprintf(stdout,"Use -> huffman [-e encode] [-d decode] input_filename output_filename\n");
+        return -1;
+    }
+    mode        = argv[1];
+    filename_in = argv[2];
+    if(strcmp(mode,"-d")==0){       
+        filename_out = (argc==4) ? argv[3] : "original.txt"; 
+    }else if(strcmp(mode,"-e")==0){
+        filename_out = (argc==4) ? argv[3] : "compressed.bin"; 
+    }else{
+        fprintf(stdout,"Use -> huffman [-e encode] [-d decode] input_filename output_filename\n");
+        return -1;
+    }
+
+    //TESTING CLA
+    fprintf(stdout,"modo: %s in: %s out: %s\n",mode,filename_in,filename_out);
+    return 0;
 
 
     //OPEN
