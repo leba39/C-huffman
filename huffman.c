@@ -754,7 +754,8 @@ int compress(FILE* fp_in, FILE* fp_out, struct map_prefix* root){
     if(!fp_in||!fp_out||!root)  return -1;
 
     //VARs
-    int exit = 0;
+    int exit    = 0;
+    bool full   = false;
     unsigned int nbytes;
     unsigned char buffer[BUFF_SIZE];                //need to find opt value for buffer_size to reduce system calls
     unsigned char cache[CACHE_SIZE] = {'\0','\0'};  //holds two bytes, we fill one, keep the leftovers in the other, write to output and clean
@@ -765,11 +766,12 @@ int compress(FILE* fp_in, FILE* fp_out, struct map_prefix* root){
     //BUFFERED STREAM
     fprintf(stdout,"File -> Reading file using buffer of: %d (bytes)\n",BUFF_SIZE);
     memset(buffer,'\0',sizeof(char)*BUFF_SIZE);
-    while((nbytes=fread(buffer,sizeof(unsigned char),BUFF_SIZE,fp_in)!=0)){
-        
+    while((nbytes=fread(buffer,sizeof(unsigned char),BUFF_SIZE,fp_in)!=0)){     //fread not returning nbytes accordingly. only 1 or 0?
         struct map_prefix* byte_prefix  = NULL;
-        for(int i=0; i<nbytes; i++){
-               
+        for(int i=0; i<BUFF_SIZE; i++){
+            
+            if(buffer[i]=='\0')    break;   //until I fix fread return value
+   
             //identify byte in prefix_table
             if((byte_prefix = get_prefix(root,buffer[i]))==NULL){   //it wont happen if we mapped correctly 
                 fprintf(stdout,"Compress -> Cant map input to prefix_table.\n");
@@ -778,7 +780,7 @@ int compress(FILE* fp_in, FILE* fp_out, struct map_prefix* root){
             }
 
             //fill cache with byte
-            if(fill_cache(cache, byte_prefix)==true){
+            if((full=fill_cache(cache, byte_prefix))==true){
 
                 //write first byte of cache
                 if(fwrite(cache,sizeof(unsigned char),1,fp_out)!=1){
@@ -791,7 +793,16 @@ int compress(FILE* fp_in, FILE* fp_out, struct map_prefix* root){
                 cache[1] = '\0';
             }
         }
+        
+        //write remnants of cache when we finish the loop if there are some
+        if(!full){
+            if(fwrite(cache,sizeof(unsigned char),1,fp_out)!=1){
+                exit = -1;
+                goto STOP;
+            };
+        }
 
+        //prepare next buffer for next loop
         memset(buffer,'\0',sizeof(unsigned char)*BUFF_SIZE);
         exit++;
     }
@@ -852,7 +863,6 @@ bool fill_cache(unsigned char cache[], struct map_prefix* byte_node){
         //pos==0;
         cursor      = BYTE_BITS;
         cache[0]    = cache[0] | byte_dec;  //perfect fit
-
     }
 
     return true;
