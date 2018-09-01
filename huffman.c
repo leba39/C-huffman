@@ -82,6 +82,7 @@ int main(int argc, char** argv){
     char *mode              = NULL;
     char *filename_in       = NULL;
     char *filename_out      = NULL;
+    bool encode             = false;
 
     //CLA
     if(argc<3||argc>4){
@@ -91,21 +92,71 @@ int main(int argc, char** argv){
     mode        = argv[1];
     filename_in = argv[2];
     if(strcmp(mode,"-d")==0){       
-        filename_out = (argc==4) ? argv[3] : "original.txt"; 
+        filename_out = (argc==4) ? argv[3] : "original.txt";
     }else if(strcmp(mode,"-e")==0){
-        filename_out = (argc==4) ? argv[3] : "compressed.bin"; 
+        filename_out = (argc==4) ? argv[3] : "compressed.bin";
+        encode = true; 
     }else{
         fprintf(stdout,"Use -> huffman [-e encode] [-d decode] input_filename output_filename\n");
         return -1;
     }
 
-    //TESTING CLA
-    fprintf(stdout,"modo: %s in: %s out: %s\n",mode,filename_in,filename_out);
-    return 0;
-
+    if(encode)  goto ENCODE;
+    
+//DECODE:
 
     //OPEN
-    if((fp_in = open_file("file.txt","r"))==NULL){
+    if((fp_in = open_file(filename_in,"r"))==NULL){
+        fprintf(stdout,"Error opening file.\n");
+        return -1;
+    }
+
+    //VERIFY
+    if(!verify_file(fp_in)){
+        fprintf(stdout,"Couldnt identify file. Verify that it was compressed properly using huffman.\n");
+        return -1;
+    }
+
+    //ORIGINAL FILESIZE
+    if((n_bytes=get_filesize(fp_in))==0){
+        fprintf(stdout,"Empty or malformed original file. Cant decode further.\n");
+        return -1;
+    }
+
+    //READ HUFFMAN PREFIXES
+    read_prefixes(fp_in, &code, &n_prefix);
+    
+    //ASSERT
+    assert(code!=NULL);
+    for(struct map_prefix* pointer=code; pointer!=NULL; pointer = pointer->next)    n_items++;
+    assert(n_prefix==n_items);
+
+
+    //PREPARE OUTPUT
+    if((fp_out = open_file(filename_out,"w"))==NULL){
+        fprintf(stdout,"Error opening output file.\n");
+        return -1;
+    }  
+
+    //DECOMPRESS
+    if(decompress(fp_in, fp_out, code)!=0){
+        fprintf(stdout,"Error decompressing input file.\n");
+        if((fclose(fp_out)!=0)||fclose(fp_in)!=0){
+            perror("Error closing output/input file(s) in decompress.");
+        }
+        return -1;
+    }
+
+    //FREE
+    free_prefix(&code);
+
+
+    return 0;
+
+ENCODE:
+
+    //OPEN
+    if((fp_in = open_file(filename_in,"r"))==NULL){
         fprintf(stdout,"Error opening file.\n");
         return -1;
     }
@@ -142,7 +193,7 @@ int main(int argc, char** argv){
 
     //OUTPUT
     fp_in = NULL;          //input already closed
-    if((fp_out = open_file("compressed.bin","w"))==NULL){
+    if((fp_out = open_file(filename_out,"w"))==NULL){
         fprintf(stdout,"Error opening output file.\n");
         return -1;
     }   
@@ -166,7 +217,7 @@ int main(int argc, char** argv){
     }
 
     //OPEN INPUT FOR 2ND PASS
-    if((fp_in = open_file("file.txt","r"))==NULL){
+    if((fp_in = open_file(filename_in,"r"))==NULL){
         fprintf(stdout,"Error opening file.\n");
         return -1;
     }
@@ -180,8 +231,6 @@ int main(int argc, char** argv){
         return -1;
     }
 
-
-    //TODO: acordarse de cerrar el archivos
     //TODO: cambiar return codes en caso de error para el main y cambiar stdouts por stderrs donde hiciese falta
     
     //FREE
