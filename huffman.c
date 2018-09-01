@@ -50,6 +50,7 @@ int write_id(FILE* fp);
 int write_header(FILE* fp, struct map_prefix* list, unsigned char* list_len, unsigned long* n_bytes);
 unsigned int calc_freq(struct bst_node* node);
 unsigned char str_to_dec(char str[], unsigned char len);
+unsigned long get_filesize(FILE* fp_in);
 void add_map(struct map_char** head, unsigned char new_data, unsigned int freq, struct bst_node* node);
 void check_map(struct map_char** head, unsigned char data);
 void print_map(struct map_char* head, unsigned char size);
@@ -65,6 +66,7 @@ void free_prefix(struct map_prefix** head);
 void print_prefix(struct map_prefix* head);
 struct map_prefix* get_prefix(struct map_prefix* root, unsigned char ascii_dec);
 bool fill_cache(unsigned char cache[], struct map_prefix* byte_node);
+bool verify_file(FILE* fp_in);
 
 int main(int argc, char** argv){
 
@@ -938,4 +940,36 @@ bool fill_cache(unsigned char cache[], struct map_prefix* byte_node){
     }
 
     return true;
+}
+
+bool verify_file(FILE* fp_in){
+
+    if(!fp_in)  return false;
+
+    //VAR
+    unsigned char ID[ID_LEN] = {0,0};
+    
+    rewind(fp); //just in case. same as fseek(fp_in,0L,SEEK_SET)
+    if(fread(ID,sizeof(unsigned char),ID_LEN,fp_in)!=ID_LEN){
+        fprintf(stdout,"File -> Couldnt read input file properly in verify_file.\n");
+        return false;
+    }
+
+    return (ID[0]==244&&ID[1]==245);    //IDs f4 & f5
+}
+
+unsigned long get_filesize(FILE* fp_in){
+
+    if(!fp_in)  return 0L;
+
+    //VAR
+    unsigned long original_filesize = 0L;
+
+    assert(ftell(fp_in)==sizeof(unsigned char)*2);  //check that we've already verified the file    
+    if(fread(&original_filesize,sizeof(unsigned long),1,fp_in)!=1){
+        fprintf(stdout,"File -> Couldnt read original file size properly from input file in get_filesize.\n");
+        return 0L;
+    }
+
+    return original_filesize;
 }
