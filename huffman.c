@@ -1061,7 +1061,6 @@ int decompress(FILE* fp_in, FILE* fp_out, struct map_prefix* root, unsigned char
             if(n_bytes_written>=n_bytes_file)   goto STOP;
         }
 
-
         //prepare next buffer for next loop
         memset(buffer,'\0',sizeof(unsigned char)*BUFF_SIZE);
         exit++;
@@ -1096,16 +1095,40 @@ unsigned char decode(unsigned char encoded_byte, struct map_prefix* root, unsign
     if(!root||!dec_leftover||!len_leftover) return 0;
 
     //VARs
-    unsigned char byte          = 0;
-    unsigned char n_bytes_found = 0;    
+    struct map_prefix* pointer  = NULL;
+    bool found                  = false;
+    unsigned char n_bytes_found = 0;
+    unsigned char cursor        = 0;
+    unsigned char byte          = encoded_byte;   
+    unsigned char i, remaining_byte;
+    
+SEARCH:
+    found = false;
+    remaining_byte = byte;
+    for(i=BYTE_BITS-1; i>cursor; i--){
+        
+        //append new bit
+        byte = remaining_byte >> i;
+        
+        //check if it is code for something
+        if((pointer=check_byte(byte,BYTE_BITS-i,root))!=NULL){
+            
+            //write output
 
 
-    for(int i=BYTE_BITS-1; i>0; i--){
-
-//        byte = encoded_byte >> i;
-
-
+            //update byte, cursor and no bytes found
+            byte    = remaining_byte << (BYTE_BITS-i);
+            cursor += BYTE_BITS-1-i;
+            n_bytes_found++;
+            found = true;
+            break;
+        }
     }
 
+    if(found)   goto SEARCH;    //keep searching
+
+    //save leftovers for next call and return no bytes found
+    *dec_leftover =  byte;
+    *len_leftover =  BYTE_BITS-i;
     return n_bytes_found;
 }
