@@ -48,8 +48,10 @@ int compress(FILE* fp_in, FILE* fp_out, struct map_prefix* root);
 int list_len(struct map_char* head);
 int write_id(FILE* fp);
 int write_header(FILE* fp, struct map_prefix* list, unsigned char* list_len, unsigned long* n_bytes);
+int decompress(FILE* fp_in, FILE* fp_out, struct map_prefix* root, unsigned char n_prefix, unsigned long n_bytes_file);
 unsigned int calc_freq(struct bst_node* node);
 unsigned char str_to_dec(char str[], unsigned char len);
+unsigned char decode(unsigned char encoded_byte, struct map_prefix* root, unsigned char* dec_leftover, unsigned char* len_leftover, FILE* fp);
 unsigned long get_filesize(FILE* fp_in);
 void add_map(struct map_char** head, unsigned char new_data, unsigned int freq, struct bst_node* node);
 void check_map(struct map_char** head, unsigned char data);
@@ -64,6 +66,8 @@ void add_prefix(unsigned char ascii, char* prefix, struct map_prefix** head);
 void build_prefixes(struct bst_node* root, struct map_prefix** list, char prefix[]);
 void free_prefix(struct map_prefix** head);
 void print_prefix(struct map_prefix* head);
+void read_prefixes(FILE* fp, struct map_prefix** code, unsigned char* num);
+void add_prefix_table(unsigned char ascii, unsigned char prefix_dec, unsigned char prefix_len, struct map_prefix** head);
 struct map_prefix* get_prefix(struct map_prefix* root, unsigned char ascii_dec);
 bool fill_cache(unsigned char cache[], struct map_prefix* byte_node);
 bool verify_file(FILE* fp_in);
@@ -118,12 +122,15 @@ int main(int argc, char** argv){
         fprintf(stdout,"Couldnt identify file. Verify that it was compressed properly using huffman.\n");
         return -1;
     }
+    fprintf(stdout,"Verify -> File identified correctly. Proceeding.\n");
 
     //ORIGINAL FILESIZE
     if((n_bytes=get_filesize(fp_in))==0){
         fprintf(stdout,"Empty or malformed original file. Cant decode further.\n");
         return -1;
     }
+    fprintf(stdout,"File -> Uncompressed original filesize: %10ld\n",n_bytes);
+   
 
     //READ HUFFMAN PREFIXES
     read_prefixes(fp_in, &code, &n_prefix);
@@ -133,7 +140,12 @@ int main(int argc, char** argv){
     for(struct map_prefix* pointer=code; pointer!=NULL; pointer = pointer->next)    n_items++;
     assert(n_prefix==n_items);
 
+    //DEBUG 
+    print_prefix(code);
+    fprintf(stdout,"Prefix -> Number of characters encoded: %10d\n",n_prefix);
 
+
+/*
     //PREPARE OUTPUT
     if((fp_out = open_file(filename_out,"w"))==NULL){
         fprintf(stdout,"Error opening output file.\n");
@@ -141,13 +153,14 @@ int main(int argc, char** argv){
     }  
 
     //DECOMPRESS
-    if(decompress(fp_in, fp_out, code)!=0){
+    if(decompress(fp_in,fp_out,code,n_prefix,n_bytes)!=0){
         fprintf(stdout,"Error decompressing input file.\n");
         if((fclose(fp_out)!=0)||fclose(fp_in)!=0){
             perror("Error closing output/input file(s) in decompress.");
         }
         return -1;
     }
+*/
 
     //FREE
     free_prefix(&code);
@@ -860,7 +873,7 @@ int compress(FILE* fp_in, FILE* fp_out, struct map_prefix* root){
                 if(fwrite(cache,sizeof(unsigned char),1,fp_out)!=1){
                     exit = -1;
                     goto STOP;
-                };
+                }
     
                 //swap positions
                 cache[0] = cache[1];
@@ -873,7 +886,7 @@ int compress(FILE* fp_in, FILE* fp_out, struct map_prefix* root){
             if(fwrite(cache,sizeof(unsigned char),1,fp_out)!=1){
                 exit = -1;
                 goto STOP;
-            };
+            }
         }
 
         //prepare next buffer for next loop
@@ -949,7 +962,7 @@ bool verify_file(FILE* fp_in){
     //VAR
     unsigned char ID[ID_LEN] = {0,0};
     
-    rewind(fp); //just in case. same as fseek(fp_in,0L,SEEK_SET)
+    rewind(fp_in); //just in case. same as fseek(fp_in,0L,SEEK_SET)
     if(fread(ID,sizeof(unsigned char),ID_LEN,fp_in)!=ID_LEN){
         fprintf(stdout,"File -> Couldnt read input file properly in verify_file.\n");
         return false;
@@ -972,4 +985,127 @@ unsigned long get_filesize(FILE* fp_in){
     }
 
     return original_filesize;
+}
+
+void read_prefixes(FILE* fp, struct map_prefix** code, unsigned char* num){
+
+    if(!fp||!code||!num)    return;
+    if(*code)   free_prefix(code);  //clean up if somehow code has a list of prefixes in it
+    
+    //VAR
+    unsigned char ascii, prefix_dec, prefix_len;
+
+    //read number of prefixes ahead
+    if(fread(num,sizeof(unsigned char),1,fp)!=1){
+        fprintf(stdout,"File -> Couldnt read number of table items ahead in read_prefixes.\n");
+        return;
+    }
+    
+    //read prefixes and build table-list
+    for(int i=0; i<(*num); i++){
+   
+        //ascii, prefix_dec and prefix_len     
+        if(fread(&ascii,sizeof(unsigned char),1,fp)!=1||fread(&prefix_dec,sizeof(unsigned char),1,fp)!=1||fread(&prefix_len,sizeof(unsigned char),1,fp)!=1){
+            fprintf(stdout,"File -> Couldnt read prefix item from input file properly.\n");
+            return;
+        }
+        add_prefix_table(ascii, prefix_dec, prefix_len, code);
+    }
+    
+    return;
+}
+
+void add_prefix_table(unsigned char ascii, unsigned char prefix_dec, unsigned char prefix_len, struct map_prefix** head){
+
+    if(!head)   return;
+    
+    //ALLOC
+    struct map_prefix* new = (struct map_prefix*)malloc(sizeof(struct map_prefix));
+    new->prefix_len = prefix_len;
+    new->prefix_dec = prefix_dec;
+    new->ascii  = ascii;
+    memset(&(new->prefix),'\0',CODE);  //unnecessary for decoding
+    new->next   = *head;
+    *head       = new;
+    
+    return;
+}
+
+int decompress(FILE* fp_in, FILE* fp_out, struct map_prefix* root, unsigned char n_prefix, unsigned long n_bytes_file){
+
+    if(!fp_in||!fp_out||!root)  return -1;
+
+    //VARs
+    int exit    = 0;
+    unsigned int nbytes;
+    unsigned int filepos;
+    unsigned long n_bytes_written = 0;
+    unsigned char byte_dec_lo, byte_len_lo;         //leftovers
+    unsigned char buffer[BUFF_SIZE];                //need to find opt value for buffer_size to reduce system calls
+    unsigned char cache[CACHE_SIZE] = {'\0','\0'};  //holds two bytes, we fill one, keep the leftovers in the other, write to output and clean
+
+    //PREPARE INPUT
+    filepos = sizeof(unsigned long)+sizeof(unsigned char)*3*(n_prefix+1);   //2 bytes for ID, 4 bytes for filesize, 1 byte for no. prefix and 3x for prefix-item
+    if(ftell(fp_in)!=filepos)   fseek(fp_in,(long)filepos,SEEK_SET);        //set position ready to decode if fp_in is not
+
+    //BUFFERED STREAM
+    fprintf(stdout,"File -> Reading file using buffer of: %d (bytes)\n",BUFF_SIZE);
+    memset(buffer,'\0',sizeof(char)*BUFF_SIZE);
+    while((nbytes=fread(buffer,sizeof(unsigned char),BUFF_SIZE,fp_in)!=0)){     //fread not returning nbytes accordingly. only 1 or 0?
+        
+        for(int i=0; i<BUFF_SIZE; i++){
+            
+            if(buffer[i]=='\0')    break;   //until I fix fread return value
+
+            n_bytes_written += decode(buffer[i],root,&byte_dec_lo,&byte_len_lo,fp_out);
+            if(n_bytes_written>=n_bytes_file)   goto STOP;
+        }
+
+
+        //prepare next buffer for next loop
+        memset(buffer,'\0',sizeof(unsigned char)*BUFF_SIZE);
+        exit++;
+    }
+    fprintf(stdout,"File -> File (input) decompressed correctly.\n");
+
+
+STOP:
+    //STOPPED READING
+    if(feof(fp_in)!=0){     //should be already at the end
+        fprintf(stdout,"File -> File (input) read successfully in %d passes.\n",exit);
+    }else{
+        fprintf(stdout,"File -> Couldnt process input file.\n");
+        if(ferror(fp_in)!=0)   fprintf(stderr,"compress ferror.\n");
+    }
+    //CLOSING FILE POINTER.
+    if(fclose(fp_in)==0&&fclose(fp_out)==0){
+        fprintf(stdout,"File -> File(s) (input|output) closed.\n");
+    }else{
+        //sets errno.
+        perror("closing file(s) in decompress");
+        return -2;
+    }
+    if(exit==-1)    return -1;   
+
+    return 0;
+
+}
+
+unsigned char decode(unsigned char encoded_byte, struct map_prefix* root, unsigned char* dec_leftover, unsigned char* len_leftover, FILE* fp){
+
+    if(!root||!dec_leftover||!len_leftover) return 0;
+
+    //VARs
+    unsigned char byte          = 0;
+    unsigned char n_bytes_found = 0;    
+
+
+    for(int i=BYTE_BITS-1; i>0; i--){
+
+//        byte = encoded_byte >> i;
+
+
+    }
+
+    return n_bytes_found;
 }
