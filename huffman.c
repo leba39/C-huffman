@@ -68,6 +68,7 @@ void free_prefix(struct map_prefix** head);
 void print_prefix(struct map_prefix* head);
 void read_prefixes(FILE* fp, struct map_prefix** code, unsigned char* num);
 void add_prefix_table(unsigned char ascii, unsigned char prefix_dec, unsigned char prefix_len, struct map_prefix** head);
+struct map_prefix* check_byte(unsigned char byte_dec, unsigned char byte_len, struct map_prefix** root);
 struct map_prefix* get_prefix(struct map_prefix* root, unsigned char ascii_dec);
 bool fill_cache(unsigned char cache[], struct map_prefix* byte_node);
 bool verify_file(FILE* fp_in);
@@ -1040,6 +1041,7 @@ int decompress(FILE* fp_in, FILE* fp_out, struct map_prefix* root, unsigned char
     unsigned int nbytes;
     unsigned int filepos;
     unsigned long n_bytes_written = 0;
+    unsigned char n_bytes_decoded = 0;
     unsigned char byte_dec_lo, byte_len_lo;         //leftovers
     unsigned char buffer[BUFF_SIZE];                //need to find opt value for buffer_size to reduce system calls
     unsigned char cache[CACHE_SIZE] = {'\0','\0'};  //holds two bytes, we fill one, keep the leftovers in the other, write to output and clean
@@ -1057,8 +1059,11 @@ int decompress(FILE* fp_in, FILE* fp_out, struct map_prefix* root, unsigned char
             
             if(buffer[i]=='\0')    break;   //until I fix fread return value
 
-            n_bytes_written += decode(buffer[i],root,&byte_dec_lo,&byte_len_lo,fp_out);
-            if(n_bytes_written>=n_bytes_file)   goto STOP;
+            if((n_bytes_decoded=decode(buffer[i],root,&byte_dec_lo,&byte_len_lo,fp_out))==0)    goto STOP;  //we should always decode at least 1
+            
+            n_bytes_written += n_bytes_decoded;
+            
+            if(n_bytes_written>=n_bytes_file)   goto STOP;  //the rest is just padding
         }
 
         //prepare next buffer for next loop
@@ -1097,24 +1102,39 @@ unsigned char decode(unsigned char encoded_byte, struct map_prefix* root, unsign
     //VARs
     struct map_prefix* pointer  = NULL;
     bool found                  = false;
+    bool leftover               = false;
     unsigned char n_bytes_found = 0;
     unsigned char cursor        = 0;
     unsigned char byte          = encoded_byte;   
-    unsigned char i, remaining_byte;
+    unsigned char i, remaining_byte, len, compound = 0;
     
 SEARCH:
     found = false;
     remaining_byte = byte;
+    
     for(i=BYTE_BITS-1; i>cursor; i--){
-        
-        //append new bit
-        byte = remaining_byte >> i;
-        
+ 
+        if(*len_leftover>0){
+            //we need to match up leftovers from previous byte with the next one
+            leftover    = true;
+            byte        = remaining_byte >> i;       
+            compound    = (*dec_leftover << i) | byte;
+            len         = *len_leftovers+BYTE_BITS-i;
+        }else{
+            //append new bit
+            leftover    = false;
+            byte        = remaining_byte >> i;
+            len         = BYTE_BITS-i;
+        }
+
         //check if it is code for something
-        if((pointer=check_byte(byte,BYTE_BITS-i,root))!=NULL){
+        if((pointer=check_byte((leftover) ? compound : byte,len,root))!=NULL){
             
             //write output
-
+            if(fwrite(&(pointer->ascii),sizeof(unsigned char),1,fp_out)!=1){
+                fprintf(stdout,"Error writing to output file in decode.\n";
+                return 0;
+            }
 
             //update byte, cursor and no bytes found
             byte    = remaining_byte << (BYTE_BITS-i);
@@ -1131,4 +1151,18 @@ SEARCH:
     *dec_leftover =  byte;
     *len_leftover =  BYTE_BITS-i;
     return n_bytes_found;
+}
+
+struct map_prefix* check_byte(unsigned char byte_dec, unsigned char byte_len, struct map_prefix** root){
+
+    if(!root)   return NULL;
+
+    //VAR
+    struct map_prefix* pointer = NULL;
+
+    for(pointer=root; pointer!=NULL; pointer=pointer->next){
+        if((pointer->prefix_dec==byte_dec)&&(pointer->prefix_len==byte_len))   break;
+    }
+
+    return pointer; //could be NULL if not found. that'd be an error.
 }
