@@ -1132,7 +1132,7 @@ SEARCH:
             //we need to match up leftovers from previous byte with the next one
             leftover    = true;
             byte        = remaining_byte >> i;       
-            compound    = (*dec_leftover << i) | byte;
+            compound    = (*dec_leftover << (BYTE_BITS-i)) | byte;
             len         = *len_leftover+BYTE_BITS-i;
         }else{
             //append new bit
