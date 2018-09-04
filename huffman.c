@@ -48,10 +48,10 @@ int compress(FILE* fp_in, FILE* fp_out, struct map_prefix* root);
 int list_len(struct map_char* head);
 int write_id(FILE* fp);
 int write_header(FILE* fp, struct map_prefix* list, unsigned char* list_len, unsigned long* n_bytes);
-int decompress(FILE* fp_in, FILE* fp_out, struct map_prefix* root, unsigned char n_prefix, unsigned long n_bytes_file);
+int decompress(FILE* fp_in, FILE* fp_out, struct map_prefix** root, unsigned char n_prefix, unsigned long n_bytes_file);
 unsigned int calc_freq(struct bst_node* node);
 unsigned char str_to_dec(char str[], unsigned char len);
-unsigned char decode(unsigned char encoded_byte, struct map_prefix* root, unsigned char* dec_leftover, unsigned char* len_leftover, FILE* fp);
+unsigned char decode(unsigned char encoded_byte,struct map_prefix** root,unsigned char* dec_leftover,unsigned char* len_leftover,FILE* fp,unsigned char cache[]);
 unsigned long get_filesize(FILE* fp_in);
 void add_map(struct map_char** head, unsigned char new_data, unsigned int freq, struct bst_node* node);
 void check_map(struct map_char** head, unsigned char data);
@@ -146,22 +146,23 @@ int main(int argc, char** argv){
     fprintf(stdout,"Prefix -> Number of characters encoded: %10d\n",n_prefix);
 
 
-/*
+
     //PREPARE OUTPUT
     if((fp_out = open_file(filename_out,"w"))==NULL){
         fprintf(stdout,"Error opening output file.\n");
         return -1;
     }  
 
+
     //DECOMPRESS
-    if(decompress(fp_in,fp_out,code,n_prefix,n_bytes)!=0){
+    if(decompress(fp_in,fp_out,&code,n_prefix,n_bytes)!=0){
         fprintf(stdout,"Error decompressing input file.\n");
         if((fclose(fp_out)!=0)||fclose(fp_in)!=0){
             perror("Error closing output/input file(s) in decompress.");
         }
         return -1;
     }
-*/
+
 
     //FREE
     free_prefix(&code);
@@ -1032,19 +1033,21 @@ void add_prefix_table(unsigned char ascii, unsigned char prefix_dec, unsigned ch
     return;
 }
 
-int decompress(FILE* fp_in, FILE* fp_out, struct map_prefix* root, unsigned char n_prefix, unsigned long n_bytes_file){
+int decompress(FILE* fp_in, FILE* fp_out, struct map_prefix** root, unsigned char n_prefix, unsigned long n_bytes_file){
 
     if(!fp_in||!fp_out||!root)  return -1;
 
     //VARs
     int exit    = 0;
+    bool stop   = false;
     unsigned int nbytes;
     unsigned int filepos;
     unsigned long n_bytes_written = 0;
     unsigned char n_bytes_decoded = 0;
-    unsigned char byte_dec_lo, byte_len_lo;         //leftovers
+    unsigned char byte_dec_lo = 0;                  //leftovers
+    unsigned char byte_len_lo = 0;
     unsigned char buffer[BUFF_SIZE];                //need to find opt value for buffer_size to reduce system calls
-    unsigned char cache[CACHE_SIZE] = {'\0','\0'};  //holds two bytes, we fill one, keep the leftovers in the other, write to output and clean
+    unsigned char cache[BYTE_BITS];
 
     //PREPARE INPUT
     filepos = sizeof(unsigned long)+sizeof(unsigned char)*3*(n_prefix+1);   //2 bytes for ID, 4 bytes for filesize, 1 byte for no. prefix and 3x for prefix-item
@@ -1059,11 +1062,20 @@ int decompress(FILE* fp_in, FILE* fp_out, struct map_prefix* root, unsigned char
             
             if(buffer[i]=='\0')    break;   //until I fix fread return value
 
-            if((n_bytes_decoded=decode(buffer[i],root,&byte_dec_lo,&byte_len_lo,fp_out))==0)    goto STOP;  //we should always decode at least 1
+            if((n_bytes_decoded=decode(buffer[i],root,&byte_dec_lo,&byte_len_lo,fp_out,cache))==0)    goto STOP;  //we should always decode at least 1
             
+            //write only decoded bytes belonging to the original file, discarding those left for padding purposes
             n_bytes_written += n_bytes_decoded;
-            
-            if(n_bytes_written>=n_bytes_file)   goto STOP;  //the rest is just padding
+            if(n_bytes_written>=n_bytes_file){
+                //the rest is just padding
+                n_bytes_decoded = n_bytes_written-n_bytes_file;
+                stop = true;
+            }
+            if(fwrite(cache,sizeof(unsigned char),n_bytes_decoded,fp_out)!=n_bytes_decoded){
+                fprintf(stdout,"Error writing to output file in decode.\n");
+                goto STOP;
+            }
+            if(stop)    goto STOP;
         }
 
         //prepare next buffer for next loop
@@ -1095,7 +1107,7 @@ STOP:
 
 }
 
-unsigned char decode(unsigned char encoded_byte, struct map_prefix* root, unsigned char* dec_leftover, unsigned char* len_leftover, FILE* fp){
+unsigned char decode(unsigned char encoded_byte,struct map_prefix** root,unsigned char* dec_leftover,unsigned char* len_leftover,FILE* fp,unsigned char cache[]){
 
     if(!root||!dec_leftover||!len_leftover) return 0;
 
@@ -1107,19 +1119,21 @@ unsigned char decode(unsigned char encoded_byte, struct map_prefix* root, unsign
     unsigned char cursor        = 0;
     unsigned char byte          = encoded_byte;   
     unsigned char i, remaining_byte, len, compound = 0;
-    
+
+    memset(cache,'\0',sizeof(char)*BYTE_BITS);
+
 SEARCH:
     found = false;
     remaining_byte = byte;
     
-    for(i=BYTE_BITS-1; i>cursor; i--){
+    for(i=BYTE_BITS-1; i>=cursor; i--){
  
         if(*len_leftover>0){
             //we need to match up leftovers from previous byte with the next one
             leftover    = true;
             byte        = remaining_byte >> i;       
             compound    = (*dec_leftover << i) | byte;
-            len         = *len_leftovers+BYTE_BITS-i;
+            len         = *len_leftover+BYTE_BITS-i;
         }else{
             //append new bit
             leftover    = false;
@@ -1129,18 +1143,16 @@ SEARCH:
 
         //check if it is code for something
         if((pointer=check_byte((leftover) ? compound : byte,len,root))!=NULL){
-            
-            //write output
-            if(fwrite(&(pointer->ascii),sizeof(unsigned char),1,fp_out)!=1){
-                fprintf(stdout,"Error writing to output file in decode.\n";
-                return 0;
-            }
 
+            //write cache            
+            cache[n_bytes_found] = pointer->ascii;           
+               
             //update byte, cursor and no bytes found
             byte    = remaining_byte << (BYTE_BITS-i);
-            cursor += BYTE_BITS-1-i;
+            cursor += BYTE_BITS-i;
             n_bytes_found++;
             found = true;
+            if(leftover)    *len_leftover=0;    //we found missing part
             break;
         }
     }
@@ -1149,7 +1161,7 @@ SEARCH:
 
     //save leftovers for next call and return no bytes found
     *dec_leftover =  byte;
-    *len_leftover =  BYTE_BITS-i;
+    *len_leftover =  BYTE_BITS-cursor;
     return n_bytes_found;
 }
 
@@ -1160,7 +1172,7 @@ struct map_prefix* check_byte(unsigned char byte_dec, unsigned char byte_len, st
     //VAR
     struct map_prefix* pointer = NULL;
 
-    for(pointer=root; pointer!=NULL; pointer=pointer->next){
+    for(pointer=*root; pointer!=NULL; pointer=pointer->next){
         if((pointer->prefix_dec==byte_dec)&&(pointer->prefix_len==byte_len))   break;
     }
 
