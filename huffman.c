@@ -883,18 +883,19 @@ int compress(FILE* fp_in, FILE* fp_out, struct map_prefix* root){
             }
         }
         
-        //write remnants of cache when we finish the loop if there are some
-        if(!full){
-            if(fwrite(cache,sizeof(unsigned char),1,fp_out)!=1){
-                exit = -1;
-                goto STOP;
-            }
-        }
-
         //prepare next buffer for next loop
         memset(buffer,'\0',sizeof(unsigned char)*BUFF_SIZE);
         exit++;
     }
+
+    //write remnants of cache when we finish the loop if there are some
+    if(!full){
+        if(fwrite(cache,sizeof(unsigned char),1,fp_out)!=1){
+            exit = -1;
+            goto STOP;
+        }
+    }
+
     fprintf(stdout,"File -> File (output) compressed correctly.\n");
 
 STOP:
@@ -1065,10 +1066,9 @@ int decompress(FILE* fp_in, FILE* fp_out, struct map_prefix** root, unsigned cha
             if((n_bytes_decoded=decode(buffer[i],root,&byte_dec_lo,&byte_len_lo,fp_out,cache))==0)    goto STOP;  //we should always decode at least 1
             
             //write only decoded bytes belonging to the original file, discarding those left for padding purposes
-            n_bytes_written += n_bytes_decoded;
-            if(n_bytes_written>=n_bytes_file){
+            if((n_bytes_written+n_bytes_decoded)>=n_bytes_file){
                 //the rest is just padding
-                n_bytes_decoded = n_bytes_written-n_bytes_file;
+                n_bytes_decoded = n_bytes_file-n_bytes_written;
                 stop = true;
             }
             if(fwrite(cache,sizeof(unsigned char),n_bytes_decoded,fp_out)!=n_bytes_decoded){
