@@ -1,3 +1,1 @@
-hola abel
-que tal estas
-este archivo tiene varias lineas
+hola que tal estas

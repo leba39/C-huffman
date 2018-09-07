@@ -1041,8 +1041,10 @@ int decompress(FILE* fp_in, FILE* fp_out, struct map_prefix** root, unsigned cha
     //VARs
     int exit    = 0;
     bool stop   = false;
-    unsigned int nbytes;
     unsigned int filepos;
+    unsigned int buff_read;    
+    unsigned long n_bytes_read  = 0;
+    unsigned long n_bytes_encoded = 0;
     unsigned long n_bytes_written = 0;
     unsigned char n_bytes_decoded = 0;
     unsigned char byte_dec_lo = 0;                  //leftovers
@@ -1050,27 +1052,41 @@ int decompress(FILE* fp_in, FILE* fp_out, struct map_prefix** root, unsigned cha
     unsigned char buffer[BUFF_SIZE];                //need to find opt value for buffer_size to reduce system calls
     unsigned char cache[BYTE_BITS];
 
+    //ENCODED FILESIZE
+    filepos = ftell(fp_in);
+    fseek(fp_in,0L,SEEK_END);
+    n_bytes_encoded = ftell(fp_in);
+    fseek(fp_in,(long)filepos,SEEK_SET);
+
     //PREPARE INPUT
     filepos = sizeof(unsigned long)+sizeof(unsigned char)*3*(n_prefix+1);   //2 bytes for ID, 4 bytes for filesize, 1 byte for no. prefix and 3x for prefix-item
-    if(ftell(fp_in)!=filepos)   fseek(fp_in,(long)filepos,SEEK_SET);        //set position ready to decode if fp_in is not
+    if(ftell(fp_in)!=filepos)   fseek(fp_in,(long)filepos,SEEK_SET);        //set position ready to decode if fp_in is not ready somehow
 
     //BUFFERED STREAM
+    n_bytes_read = filepos;
     fprintf(stdout,"File -> Reading file using buffer of: %d (bytes)\n",BUFF_SIZE);
     memset(buffer,'\0',sizeof(char)*BUFF_SIZE);
-    while((nbytes=fread(buffer,sizeof(unsigned char),BUFF_SIZE,fp_in)!=0)){     //fread not returning nbytes accordingly. only 1 or 0?
-        
-        for(int i=0; i<BUFF_SIZE; i++){
-            
-            if(buffer[i]=='\0')    break;   //until I fix fread return value
+    while(fread(buffer,sizeof(unsigned char),BUFF_SIZE,fp_in)!=0){   
+   
+        //how many bytes were actually fed into buffer (that is, read)
+        buff_read       = (ftell(fp_in)!=n_bytes_encoded) ? BUFF_SIZE : (n_bytes_encoded-n_bytes_read);   //we read whole chunk unless we are at eof
+        n_bytes_read   += buff_read;    //we have to do this because fread isnt returning no of bytes. only 1 or 0.
 
+        for(int i=0; i<buff_read; i++){
+  
+            //decode
             if((n_bytes_decoded=decode(buffer[i],root,&byte_dec_lo,&byte_len_lo,fp_out,cache))==0)    goto STOP;  //we should always decode at least 1
             
-            //write only decoded bytes belonging to the original file, discarding those left for padding purposes
+            //only decoded bytes belonging to the original file, discarding those left for padding purposes
             if((n_bytes_written+n_bytes_decoded)>=n_bytes_file){
                 //the rest is just padding
                 n_bytes_decoded = n_bytes_file-n_bytes_written;
                 stop = true;
+            }else{
+                n_bytes_written += n_bytes_decoded;
             }
+            
+            //write to output
             if(fwrite(cache,sizeof(unsigned char),n_bytes_decoded,fp_out)!=n_bytes_decoded){
                 fprintf(stdout,"Error writing to output file in decode.\n");
                 goto STOP;
