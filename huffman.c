@@ -888,12 +888,11 @@ int compress(FILE* fp_in, FILE* fp_out, struct map_prefix* root){
         exit++;
     }
 
-    //write remnants of cache when we finish the loop if there are some
-    if(!full){
-        if(fwrite(cache,sizeof(unsigned char),1,fp_out)!=1){
-            exit = -1;
-            goto STOP;
-        }
+    //write remnants of cache when we finish the loop
+    //if full cache[1], now in cache[0] -because of last swap- may contain useful info. if !full cache[0] does as well
+    if(fwrite(cache,sizeof(unsigned char),1,fp_out)!=1){
+        exit = -1;
+        goto STOP;
     }
 
     fprintf(stdout,"File -> File (output) compressed correctly.\n");
